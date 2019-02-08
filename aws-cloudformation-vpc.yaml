@@ -1,0 +1,268 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Cloudformation Stack that creates a VPC with 4 subnets (2 public, 2 private), Internet Gateway, NAT Gateway for Private Subnets, Network Access Control Lists and a Bastion Host under a AutoScaling Group
+Parameters:
+Mappings:
+  CidrBlocks:
+    public:
+      az1: "10.0.10.0/24"
+      az2: "10.0.20.0/24"
+    private:
+      az1: "10.0.30.0/24"
+      az2: "10.0.40.0/24"
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'VPC'
+
+  PublicSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      CidrBlock: !FindInMap [CidrBlocks, 'public', 'az1']
+      VpcId: !Ref VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'PublicSubnetAZ1'
+              - Fn::Select:
+                - 0
+                - Fn::GetAZs: ""
+  PublicSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      MapPublicIpOnLaunch: true
+      CidrBlock: !FindInMap [CidrBlocks, 'public', 'az2']
+      VpcId: !Ref VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'PublicSubnetAZ2'
+              - Fn::Select:
+                  - 1
+                  - Fn::GetAZs: ""
+  PublicSubnetAZ1A:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTablePublic
+      SubnetId: !Ref PublicSubnetAZ1
+  PublicSubnetAZ2A:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTablePublic
+      SubnetId: !Ref PublicSubnetAZ2
+
+  PrivateSubnetAZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !FindInMap [CidrBlocks, 'private', 'az1']
+      VpcId: !Ref VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'PrivateSubnetAZ1'
+              - Fn::Select:
+                  - 0
+                  - Fn::GetAZs: ""
+  PrivateSubnetAZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: !FindInMap [CidrBlocks, 'private', 'az2']
+      VpcId: !Ref VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'PrivateSubnetAZ2'
+              - Fn::Select:
+                  - 1
+                  - Fn::GetAZs: ""
+  PrivateSubnetAZ1A:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTablePrivate
+      SubnetId: !Ref PrivateSubnetAZ1
+  PrivateSubnetAZ2A:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTablePrivate
+      SubnetId: !Ref PrivateSubnetAZ2
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'IGW'
+  IGWA:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref IGW
+      VpcId: !Ref VPC
+  IGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTablePublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  NGW:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+          - EIPNGW
+          - AllocationId
+      SubnetId: !Ref PublicSubnetAZ1
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'NGW'
+  EIPNGW:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NGWRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTablePrivate
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NGW
+
+  NACLPublic:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'NACLPublic'
+  NACLPrivate:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'NACLPrivate'
+  NACLPublicAZ1:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ1
+      NetworkAclId: !Ref NACLPublic
+  NACLPublicAZ2:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetAZ2
+      NetworkAclId: !Ref NACLPublic
+  NACLPrivateAZ1:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetAZ1
+      NetworkAclId: !Ref NACLPrivate
+  NACLPrivateAZ2:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetAZ2
+      NetworkAclId: !Ref NACLPrivate
+
+  RouteTablePublic:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'RouteTablePublic'
+  RouteTablePrivate:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'RouteTablePrivate'
+
+Outputs:
+  VPC:
+    Description: First Public Subnet
+    Value: !Ref VPC
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'VPC'
+  PublicSubnetAZ1:
+    Description: First Public Subnet
+    Value: !Ref PublicSubnetAZ1
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'PublicSubnetAZ1'
+  PublicSubnetAZ2:
+    Description: Second Public Subnet
+    Value: !Ref PublicSubnetAZ2
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'PublicSubnetAZ2'
+  PrivateSubnetAZ1:
+    Description: First Public Subnet
+    Value: !Ref PrivateSubnetAZ1
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'PrivateSubnetAZ1'
+  PrivateSubnetAZ2:
+    Description: Second Public Subnet
+    Value: !Ref PrivateSubnetAZ2
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'PrivateSubnetAZ2'
