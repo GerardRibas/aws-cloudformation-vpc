@@ -1,6 +1,18 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Cloudformation Stack that creates a VPC with 4 subnets (2 public, 2 private), Internet Gateway, NAT Gateway for Private Subnets, Network Access Control Lists and a Bastion Host under a AutoScaling Group
 Parameters:
+  BastionInstanceType:
+    Type: "String"
+    Default: "t2.nano"
+    Description: "Bastion Host EC2 instance type"
+  KeyName:
+    Type: "String"
+    Default: "us-key-pair"
+    Description: "Name of an existing EC2 KeyPair to enable SSH in Bastion Host"
+  SshCidrIpAllowed:
+    Type: "String"
+    Default: "0.0.0.0/0"
+    Description: "IP Allowed to SSH in Bastion Host"
 Mappings:
   CidrBlocks:
     public:
@@ -9,6 +21,9 @@ Mappings:
     private:
       az1: "10.0.30.0/24"
       az2: "10.0.40.0/24"
+  RegionMap:
+    us-east-1:
+      HVM64: ami-035be7bafff33b6b6boh
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -225,6 +240,297 @@ Resources:
             - - !Ref AWS::StackName
               - 'RouteTablePrivate'
 
+  NACLPublicEntryInboundHTTP:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 100
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '80'
+        To: '80'
+  NACLPublicEntryInboundHTTPS:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 110
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '443'
+        To: '443'
+  NACLPublicEntryInboundSSH:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 120
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: !Ref SshCidrIpAllowed
+      PortRange:
+        From: '22'
+        To: '22'
+  NACLPublicEntryInboundEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 130
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '1024'
+        To: '65535'
+
+  NACLPublicEntryOutboundHTTP:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 100
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '80'
+        To: '80'
+  NACLPublicEntryOutboundHTTPS:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 110
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '443'
+        To: '443'
+  NACLPublicEntryOutboundSSHAZ1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 120
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: !FindInMap [CidrBlocks, 'private', 'az1']
+      PortRange:
+        From: '22'
+        To: '22'
+  NACLPublicEntryOutboundSSHAZ2:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 130
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: !FindInMap [CidrBlocks, 'private', 'az2']
+      PortRange:
+        From: '22'
+        To: '22'
+  NACLPublicEntryOutboundEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPublic
+      RuleNumber: 140
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '1024'
+        To: '65535'
+
+  NACLPrivateEntryInboundSSH:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPrivate
+      RuleNumber: 100
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 10.0.0.0/16
+      PortRange:
+        From: '22'
+        To: '22'
+  NACLPrivateEntryInboundEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPrivate
+      RuleNumber: 110
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '1024'
+        To: '65535'
+
+  NACLPrivateEntryOutboundHTTP:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPrivate
+      RuleNumber: 100
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '80'
+        To: '80'
+  NACLPrivateEntryOutboundHTTPS:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPrivate
+      RuleNumber: 110
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '443'
+        To: '443'
+  NACLPrivateEntryOutboundEphemeral:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      NetworkAclId: !Ref NACLPrivate
+      RuleNumber: 120
+      Protocol: "6"
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 10.0.0.0/16
+      PortRange:
+        From: '1024'
+        To: '65535'
+
+  BastionLaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', 'HVM64']
+      SecurityGroups: [!Ref BastionSecurityGroup]
+      InstanceType: !Ref BastionInstanceType
+      KeyName: !Ref KeyName
+      LaunchConfigurationName: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'BastionLaunchConfiguration'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum -y update
+
+
+  BastionAutoscalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'BastionAutoscalingGroup'
+      VPCZoneIdentifier:
+        - !Ref PublicSubnetAZ1
+        - !Ref PublicSubnetAZ2
+      DesiredCapacity: 1
+      MaxSize: 1
+      MinSize: 1
+      LaunchConfigurationName: !Ref BastionLaunchConfiguration
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupName: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'BastionSecurityGroup'
+      GroupDescription: "Security Group for allowing SSH to Bastion Host"
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: "10.0.0.0/16"
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 1024
+          ToPort: 65535
+          CidrIp: "0.0.0.0/0"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshCidrIpAllowed
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 1024
+          ToPort: 65535
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'BastionSecurityGroup'
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupName: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'PrivateSecurityGroup'
+      GroupDescription: "Security Group for allowing ssh from vpc and perform updates from NAT Instance"
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: tcp
+          FromPort: 1024
+          ToPort: 65535
+          CidrIp: "0.0.0.0/0"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: tcp
+          FromPort: 1024
+          ToPort: 65535
+          CidrIp: "0.0.0.0/0"
+      Tags:
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref AWS::StackName
+              - 'PrivateSecurityGroup'
+
 Outputs:
   VPC:
     Description: First Public Subnet
@@ -266,3 +572,19 @@ Outputs:
         - '-'
         - - !Ref AWS::StackName
           - 'PrivateSubnetAZ2'
+  BastionSecurityGroup:
+    Description: Bastion Security Group
+    Value: !Ref BastionSecurityGroup
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'BastionSecurityGroup'
+  PrivateSecurityGroup:
+    Description: Private Security Group
+    Value: !Ref PrivateSecurityGroup
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref AWS::StackName
+          - 'PrivateSecurityGroup'AWSTemplateFormatVersion: "2010-09-09"
