@@ -23,7 +23,7 @@ Mappings:
       az2: "10.0.40.0/24"
   RegionMap:
     us-east-1:
-      HVM64: ami-035be7bafff33b6b6boh
+      HVM64: ami-035be7bafff33b6b6
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -587,4 +587,4 @@ Outputs:
       Name: !Join
         - '-'
         - - !Ref AWS::StackName
-          - 'PrivateSecurityGroup'AWSTemplateFormatVersion: "2010-09-09"
+          - 'PrivateSecurityGroup'
